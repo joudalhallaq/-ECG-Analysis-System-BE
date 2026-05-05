@@ -59,7 +59,8 @@ def set_record_field_if_exists(record, field_name, value):
         setattr(record, field_name, value)
 
 
-def extract_signal_values_from_csv(file_path, max_points=300):
+
+def extract_signal_values_from_csv(file_path, max_points=500):
     signal_values = []
 
     if not file_path:
@@ -68,26 +69,22 @@ def extract_signal_values_from_csv(file_path, max_points=300):
     try:
         with open(file_path, "r", encoding="utf-8", errors="ignore") as file:
             reader = csv.reader(file)
+
             for row in reader:
-                numeric_value = None
                 for cell in row:
                     try:
-                        numeric_value = float(cell)
-                        break
+                        value = float(str(cell).strip())
+                        signal_values.append(value)
+
+                        if len(signal_values) >= max_points:
+                            return signal_values
                     except ValueError:
                         continue
 
-                if numeric_value is not None:
-                    signal_values.append(numeric_value)
-
-                if len(signal_values) >= max_points:
-                    break
     except Exception as error:
         print("Signal extraction error:", error)
 
     return signal_values
-
-
 def build_short_explanation(predicted_condition):
     if predicted_condition == "Normal":
         return (
