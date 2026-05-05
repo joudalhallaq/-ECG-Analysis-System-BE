@@ -3,7 +3,6 @@ import json
 from pathlib import Path
 
 import numpy as np
-import tensorflow as tf
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -26,6 +25,7 @@ def load_assets():
     global _MODEL, _CLASSES, _TRAIN_MEAN, _TRAIN_STD, _CONFIG
 
     if _MODEL is None:
+        import tensorflow as tf
         _MODEL = tf.keras.models.load_model(MODEL_PATH, compile=False)
 
     if _CLASSES is None:
