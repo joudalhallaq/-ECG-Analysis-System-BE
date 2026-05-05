@@ -2,16 +2,14 @@ import csv
 import json
 from io import BytesIO
 from datetime import datetime
-
+from .predictor import predict_ecg_file
 from django.contrib.auth.models import User
 from django.core.files.base import ContentFile
 from django.http import JsonResponse, FileResponse
 from django.shortcuts import get_object_or_404
 from django.views.decorators.csrf import csrf_exempt
-
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
-
 from .models import ECGRecord
 
 
@@ -165,10 +163,17 @@ def serialize_record(record):
 
 
 def run_ai_model_placeholder(record):
-    predicted_condition = "Normal"
-    confidence = 0.95
-    return predicted_condition, confidence
+    """
+    Runs the real trained ECG model.
+    """
+    file_path = get_record_file_path(record)
 
+    if not file_path:
+        raise ValueError("ECG file path not found.")
+
+    predicted_condition, confidence, probabilities = predict_ecg_file(file_path)
+
+    return predicted_condition, confidence
 
 @csrf_exempt
 def upload_ecg(request):
