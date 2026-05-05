@@ -16,6 +16,14 @@ from .models import ECGRecord
 
 
 # -----------------------------
+# Test API
+# -----------------------------
+
+def test_api(request):
+    return JsonResponse({"message": "ECG API is working"})
+
+
+# -----------------------------
 # Helper Functions
 # -----------------------------
 
@@ -25,7 +33,7 @@ def model_has_field(model_class, field_name):
 
 def get_file_field_name():
     """
-    Supports either ecg_file or file depending on your model field name.
+    Supports either ecg_file or file depending on your ECGRecord model field name.
     """
     if model_has_field(ECGRecord, "ecg_file"):
         return "ecg_file"
@@ -74,13 +82,12 @@ def set_record_field_if_exists(record, field_name, value):
         setattr(record, field_name, value)
 
 
-def extract_signal_values_from_csv(file_path, max_points=300):
+def extract_signal_values_from_csv(file_path, max_points=500):
     """
     Reads numeric ECG-like values from a CSV file and returns them
     for frontend ECG visualization.
 
-    It looks for numeric cells row by row and takes the first numeric value
-    found in each row.
+    This reads all numeric cells it can find, not just one column.
     """
     signal_values = []
 
@@ -92,20 +99,15 @@ def extract_signal_values_from_csv(file_path, max_points=300):
             reader = csv.reader(file)
 
             for row in reader:
-                numeric_value = None
-
                 for cell in row:
                     try:
-                        numeric_value = float(cell)
-                        break
+                        value = float(str(cell).strip())
+                        signal_values.append(value)
+
+                        if len(signal_values) >= max_points:
+                            return signal_values
                     except ValueError:
                         continue
-
-                if numeric_value is not None:
-                    signal_values.append(numeric_value)
-
-                if len(signal_values) >= max_points:
-                    break
 
     except Exception as error:
         print("Signal extraction error:", error)
@@ -185,17 +187,25 @@ def serialize_record(record):
     return {
         "id": record.id,
         "file_name": get_record_file_name(record),
-        "uploaded_at": record.uploaded_at.isoformat() if hasattr(record, "uploaded_at") and record.uploaded_at else None,
+        "uploaded_at": (
+            record.uploaded_at.isoformat()
+            if hasattr(record, "uploaded_at") and record.uploaded_at
+            else None
+        ),
         "predicted_condition": getattr(record, "predicted_condition", None),
         "confidence": getattr(record, "confidence", None),
-        "short_explanation": getattr(record, "short_explanation", None) if model_has_field(ECGRecord, "short_explanation") else None,
+        "short_explanation": (
+            getattr(record, "short_explanation", None)
+            if model_has_field(ECGRecord, "short_explanation")
+            else None
+        ),
     }
 
 
 def run_ai_model_placeholder(record):
     """
     Replace this later with your real trained model prediction.
-    Currently keeps your existing behavior: Normal with 95% confidence.
+    Currently returns Normal with 95% confidence.
     """
     predicted_condition = "Normal"
     confidence = 0.95
@@ -223,7 +233,7 @@ def upload_ecg(request):
     if not user_id or not uploaded_file:
         return JsonResponse(
             {"error": "user_id and ecg_file are required"},
-            status=400
+            status=400,
         )
 
     try:
@@ -235,8 +245,10 @@ def upload_ecg(request):
 
     if not file_field:
         return JsonResponse(
-            {"error": "No file field found in ECGRecord model. Expected ecg_file or file."},
-            status=500
+            {
+                "error": "No file field found in ECGRecord model. Expected ecg_file or file."
+            },
+            status=500,
         )
 
     try:
@@ -247,16 +259,18 @@ def upload_ecg(request):
 
         record.save()
 
-        return JsonResponse({
-            "message": "ECG uploaded successfully",
-            "record_id": record.id,
-            "file_name": get_record_file_name(record),
-        })
+        return JsonResponse(
+            {
+                "message": "ECG uploaded successfully",
+                "record_id": record.id,
+                "file_name": get_record_file_name(record),
+            }
+        )
 
     except Exception as error:
         return JsonResponse(
             {"error": f"Upload failed: {str(error)}"},
-            status=500
+            status=500,
         )
 
 
@@ -284,7 +298,7 @@ def device_submit(request):
     if not user_id or not ecg_data:
         return JsonResponse(
             {"error": "user_id and ecg_data are required"},
-            status=400
+            status=400,
         )
 
     try:
@@ -296,8 +310,10 @@ def device_submit(request):
 
     if not file_field:
         return JsonResponse(
-            {"error": "No file field found in ECGRecord model. Expected ecg_file or file."},
-            status=500
+            {
+                "error": "No file field found in ECGRecord model. Expected ecg_file or file."
+            },
+            status=500,
         )
 
     try:
@@ -313,16 +329,18 @@ def device_submit(request):
 
         record.save()
 
-        return JsonResponse({
-            "message": "ECG data received successfully from external device",
-            "record_id": record.id,
-            "file_name": get_record_file_name(record),
-        })
+        return JsonResponse(
+            {
+                "message": "ECG data received successfully from external device",
+                "record_id": record.id,
+                "file_name": get_record_file_name(record),
+            }
+        )
 
     except Exception as error:
         return JsonResponse(
             {"error": f"Device ECG submission failed: {str(error)}"},
-            status=500
+            status=500,
         )
 
 
@@ -366,15 +384,16 @@ def analyze_ecg(request):
     signal_values = extract_signal_values_from_csv(file_path)
 
     if not signal_values:
-        # We do not block analysis here because your current demo model
-        # may still return a result. But the chart may not appear.
         print("Warning: No numeric ECG signal values extracted.")
 
     try:
         predicted_condition, confidence = run_ai_model_placeholder(record)
 
         short_explanation = build_short_explanation(predicted_condition)
-        detailed_explanation = build_detailed_explanation(predicted_condition, confidence)
+        detailed_explanation = build_detailed_explanation(
+            predicted_condition,
+            confidence,
+        )
 
         set_record_field_if_exists(record, "predicted_condition", predicted_condition)
         set_record_field_if_exists(record, "confidence", confidence)
@@ -384,22 +403,24 @@ def analyze_ecg(request):
 
         record.save()
 
-        return JsonResponse({
-            "message": "ECG analyzed successfully",
-            "record_id": record.id,
-            "predicted_condition": predicted_condition,
-            "confidence": confidence,
-            "short_explanation": short_explanation,
-            "detailed_explanation": detailed_explanation,
-            "xai_explanation": xai_explanation_text(),
-            "signal_values": signal_values,
-            "disclaimer": medical_disclaimer(),
-        })
+        return JsonResponse(
+            {
+                "message": "ECG analyzed successfully",
+                "record_id": record.id,
+                "predicted_condition": predicted_condition,
+                "confidence": confidence,
+                "short_explanation": short_explanation,
+                "detailed_explanation": detailed_explanation,
+                "xai_explanation": xai_explanation_text(),
+                "signal_values": signal_values,
+                "disclaimer": medical_disclaimer(),
+            }
+        )
 
     except Exception as error:
         return JsonResponse(
             {"error": f"AI model failed to analyze ECG: {str(error)}"},
-            status=500
+            status=500,
         )
 
 
@@ -426,24 +447,33 @@ def get_result(request, record_id):
         short_explanation = build_short_explanation(predicted_condition)
 
     if not detailed_explanation:
-        detailed_explanation = build_detailed_explanation(predicted_condition, confidence)
+        detailed_explanation = build_detailed_explanation(
+            predicted_condition,
+            confidence,
+        )
 
     file_path = get_record_file_path(record)
     signal_values = extract_signal_values_from_csv(file_path)
 
-    return JsonResponse({
-        "record_id": record.id,
-        "id": record.id,
-        "file_name": get_record_file_name(record),
-        "uploaded_at": record.uploaded_at.isoformat() if hasattr(record, "uploaded_at") and record.uploaded_at else None,
-        "predicted_condition": predicted_condition,
-        "confidence": confidence,
-        "short_explanation": short_explanation,
-        "detailed_explanation": detailed_explanation,
-        "xai_explanation": xai_explanation_text(),
-        "signal_values": signal_values,
-        "disclaimer": medical_disclaimer(),
-    })
+    return JsonResponse(
+        {
+            "record_id": record.id,
+            "id": record.id,
+            "file_name": get_record_file_name(record),
+            "uploaded_at": (
+                record.uploaded_at.isoformat()
+                if hasattr(record, "uploaded_at") and record.uploaded_at
+                else None
+            ),
+            "predicted_condition": predicted_condition,
+            "confidence": confidence,
+            "short_explanation": short_explanation,
+            "detailed_explanation": detailed_explanation,
+            "xai_explanation": xai_explanation_text(),
+            "signal_values": signal_values,
+            "disclaimer": medical_disclaimer(),
+        }
+    )
 
 
 @csrf_exempt
@@ -472,7 +502,7 @@ def delete_ecg(request, record_id):
     except Exception as error:
         return JsonResponse(
             {"error": f"Delete failed: {str(error)}"},
-            status=500
+            status=500,
         )
 
 
@@ -538,6 +568,11 @@ def download_report(request, record_id):
     pdf.setFont("Helvetica", 10)
 
     for line in split_text(short_explanation, 95):
+        if y < 90:
+            pdf.showPage()
+            y = height - 60
+            pdf.setFont("Helvetica", 10)
+
         pdf.drawString(70, y, line)
         y -= 16
 
@@ -600,3 +635,15 @@ def download_report(request, record_id):
         filename=f"ecg_report_{record.id}.pdf",
         content_type="application/pdf",
     )
+
+
+# -----------------------------
+# Aliases for your existing urls.py names
+# -----------------------------
+
+def list_ecg_records(request):
+    return get_records(request)
+
+
+def get_ecg_result(request, record_id):
+    return get_result(request, record_id)
