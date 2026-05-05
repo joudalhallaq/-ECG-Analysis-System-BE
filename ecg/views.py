@@ -2,7 +2,6 @@ import csv
 import json
 from io import BytesIO
 from datetime import datetime
-from .predictor import predict_ecg_file
 from django.contrib.auth.models import User
 from django.core.files.base import ContentFile
 from django.http import JsonResponse, FileResponse
@@ -164,17 +163,19 @@ def serialize_record(record):
 
 def run_ai_model_placeholder(record):
     """
-    Runs the real trained ECG model.
+    Runs the real trained ECG model only when Analyze is requested.
+    TensorFlow is imported lazily to avoid loading it during server startup.
     """
     file_path = get_record_file_path(record)
 
     if not file_path:
         raise ValueError("ECG file path not found.")
 
+    from .predictor import predict_ecg_file
+
     predicted_condition, confidence, probabilities = predict_ecg_file(file_path)
 
     return predicted_condition, confidence
-
 @csrf_exempt
 def upload_ecg(request):
     if request.method != "POST":
