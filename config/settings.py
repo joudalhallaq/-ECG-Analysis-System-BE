@@ -1,3 +1,6 @@
+from pathlib import Path
+import os
+import dj_database_url
 """
 Django settings for config project.
 
