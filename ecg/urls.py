@@ -7,6 +7,7 @@ from .views import (
     get_ecg_result,
     delete_ecg,
     download_report,
+    device_submit,
 )
 
 urlpatterns = [
@@ -17,4 +18,5 @@ urlpatterns = [
     path("result/<int:record_id>/", get_ecg_result),
     path("delete/<int:record_id>/", delete_ecg),
     path("report/<int:record_id>/", download_report),
+    path("device-submit/", device_submit),
 ]
