@@ -1,0 +1,16 @@
+{
+    "sampling_rate": 100,
+    "filter_type": "butterworth_lowpass",
+    "filter_order": 2,
+    "cutoff_hz": 40.0,
+    "input_shape": [
+        1000,
+        12
+    ],
+    "classes": [
+        "CD",
+        "HYP",
+        "MI",
+        "NORM"
+    ]
+}
