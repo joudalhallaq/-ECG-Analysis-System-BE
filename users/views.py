@@ -1,83 +1,94 @@
+import json
 from django.contrib.auth.models import User
+from django.contrib.auth import authenticate
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
-import json
 
 
 @csrf_exempt
 def register_user(request):
-    if request.method == 'POST':
-        try:
-            data = json.loads(request.body)
+    if request.method != "POST":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
 
-            username = data.get('username')
-            email = data.get('email')
-            password = data.get('password')
+    try:
+        data = json.loads(request.body)
+    except Exception:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
 
-            if not username or not email or not password:
-                return JsonResponse({
-                    'error': 'Username, email, and password are required'
-                }, status=400)
+    username = str(data.get("username", "")).strip()
+    email = str(data.get("email", "")).strip().lower()
+    password = str(data.get("password", "")).strip()
+    confirm_password = str(data.get("confirm_password", "")).strip()
 
-            if User.objects.filter(username=username).exists():
-                return JsonResponse({
-                    'error': 'Username already exists'
-                }, status=400)
+    if not username or not email or not password or not confirm_password:
+        return JsonResponse(
+            {"error": "username, email, password, and confirm_password are required"},
+            status=400
+        )
 
-            if User.objects.filter(email=email).exists():
-                return JsonResponse({
-                    'error': 'Email already exists'
-                }, status=400)
+    if password != confirm_password:
+        return JsonResponse(
+            {"error": "Password and confirm password do not match"},
+            status=400
+        )
 
-            user = User.objects.create_user(
-                username=username,
-                email=email,
-                password=password
-            )
+    if User.objects.filter(username__iexact=username).exists():
+        return JsonResponse(
+            {"error": "This username is already taken"},
+            status=400
+        )
 
-            return JsonResponse({
-                'message': 'User registered successfully',
-                'user_id': user.id,
-                'username': user.username
-            }, status=201)
+    if User.objects.filter(email__iexact=email).exists():
+        return JsonResponse(
+            {"error": "This email is already registered"},
+            status=400
+        )
 
-        except Exception as e:
-            return JsonResponse({
-                'error': str(e)
-            }, status=400)
+    try:
+        user = User.objects.create_user(
+            username=username,
+            email=email,
+            password=password
+        )
 
-    return JsonResponse({
-        'error': 'Only POST method is allowed'
-    }, status=405)
-from django.contrib.auth import authenticate
+        return JsonResponse({
+            "message": "User registered successfully",
+            "user_id": user.id,
+            "username": user.username,
+            "email": user.email,
+        })
+
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
 
 @csrf_exempt
 def login_user(request):
-    if request.method == 'POST':
-        try:
-            data = json.loads(request.body)
+    if request.method != "POST":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
 
-            username = data.get('username')
-            password = data.get('password')
+    try:
+        data = json.loads(request.body)
+    except Exception:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
 
-            user = authenticate(username=username, password=password)
+    username = str(data.get("username", "")).strip()
+    password = str(data.get("password", "")).strip()
 
-            if user is not None:
-                return JsonResponse({
-                    'message': 'Login successful',
-                    'user_id': user.id,
-                    'username': user.username
-                })
-            else:
-                return JsonResponse({
-                    'error': 'Invalid credentials'
-                }, status=400)
+    if not username or not password:
+        return JsonResponse(
+            {"error": "username and password are required"},
+            status=400
+        )
 
-        except Exception as e:
-            return JsonResponse({
-                'error': str(e)
-            }, status=400)
+    user = authenticate(username=username, password=password)
+
+    if user is None:
+        return JsonResponse({"error": "Invalid credentials"}, status=400)
 
     return JsonResponse({
-        'error': 'Only POST method is allowed'
-    }, status=405)
+        "message": "Login successful",
+        "user_id": user.id,
+        "username": user.username,
+        "email": user.email,
+    })
