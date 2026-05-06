@@ -15,39 +15,15 @@ MEAN_PATH = MODEL_DIR / "train_mean.npy"
 STD_PATH = MODEL_DIR / "train_std.npy"
 CONFIG_PATH = MODEL_DIR / "preprocessing_config.json"
 
-_INTERPRETER = None
-_SIGNATURE_RUNNER = None
-_INPUT_NAME = None
-_OUTPUT_NAME = None
+
 _CLASSES = None
 _TRAIN_MEAN = None
 _TRAIN_STD = None
 _CONFIG = None
 
 
-def load_assets():
-    global _INTERPRETER, _SIGNATURE_RUNNER, _INPUT_NAME, _OUTPUT_NAME
+def load_metadata():
     global _CLASSES, _TRAIN_MEAN, _TRAIN_STD, _CONFIG
-
-    if _INTERPRETER is None:
-        _INTERPRETER = Interpreter(model_path=str(MODEL_PATH))
-        _INTERPRETER.allocate_tensors()
-
-        signature_list = _INTERPRETER.get_signature_list()
-
-        if signature_list:
-            signature_key = "serving_default"
-
-            if signature_key not in signature_list:
-                signature_key = list(signature_list.keys())[0]
-
-            signature_info = signature_list[signature_key]
-
-            _INPUT_NAME = signature_info["inputs"][0]
-            _OUTPUT_NAME = signature_info["outputs"][0]
-            _SIGNATURE_RUNNER = _INTERPRETER.get_signature_runner(signature_key)
-        else:
-            _SIGNATURE_RUNNER = None
 
     if _CLASSES is None:
         with open(CLASSES_PATH, "r", encoding="utf-8") as file:
@@ -71,16 +47,23 @@ def load_assets():
         else:
             _CONFIG = {}
 
-    return (
-        _INTERPRETER,
-        _SIGNATURE_RUNNER,
-        _INPUT_NAME,
-        _OUTPUT_NAME,
-        _CLASSES,
-        _TRAIN_MEAN,
-        _TRAIN_STD,
-        _CONFIG,
-    )
+    return _CLASSES, _TRAIN_MEAN, _TRAIN_STD, _CONFIG
+
+
+def create_interpreter():
+    interpreter = Interpreter(model_path=str(MODEL_PATH))
+    interpreter.allocate_tensors()
+
+    input_details = interpreter.get_input_details()
+    output_details = interpreter.get_output_details()
+
+    if not input_details:
+        raise ValueError("TFLite model input details are empty.")
+
+    if not output_details:
+        raise ValueError("TFLite model output details are empty.")
+
+    return interpreter, input_details, output_details
 
 
 def read_numeric_csv(file_path):
@@ -109,20 +92,17 @@ def read_numeric_csv(file_path):
     return values
 
 
-def get_expected_shape(interpreter, config):
-    input_details = interpreter.get_input_details()
+def get_expected_shape(input_details, config):
+    shape = list(input_details[0].get("shape", []))
 
     expected_length = 1000
     expected_leads = 12
 
-    if input_details:
-        shape = list(input_details[0].get("shape", []))
-
-        if len(shape) >= 3:
-            if int(shape[1]) > 0:
-                expected_length = int(shape[1])
-            if int(shape[2]) > 0:
-                expected_leads = int(shape[2])
+    if len(shape) >= 3:
+        if int(shape[1]) > 0:
+            expected_length = int(shape[1])
+        if int(shape[2]) > 0:
+            expected_leads = int(shape[2])
 
     expected_length = int(
         config.get("signal_length")
@@ -141,25 +121,14 @@ def get_expected_shape(interpreter, config):
     return expected_length, expected_leads
 
 
-def prepare_signal(file_path):
-    (
-        interpreter,
-        _,
-        _,
-        _,
-        _,
-        train_mean,
-        train_std,
-        config,
-    ) = load_assets()
-
+def prepare_signal(file_path, input_details, train_mean, train_std, config):
     values = read_numeric_csv(file_path)
     arr = np.array(values, dtype=np.float32)
 
     if arr.ndim == 1:
         arr = arr.reshape(-1, 1)
 
-    expected_length, expected_leads = get_expected_shape(interpreter, config)
+    expected_length, expected_leads = get_expected_shape(input_details, config)
 
     if arr.shape[1] > expected_leads:
         arr = arr[:, :expected_leads]
@@ -185,63 +154,82 @@ def prepare_signal(file_path):
     return arr.astype(np.float32)
 
 
+def apply_input_dtype_and_quantization(x, input_detail):
+    input_dtype = input_detail.get("dtype", np.float32)
+
+    if input_dtype == np.float32:
+        return x.astype(np.float32)
+
+    quantization = input_detail.get("quantization", None)
+
+    if quantization:
+        scale, zero_point = quantization
+
+        if scale and scale > 0:
+            x = x / scale + zero_point
+
+    return x.astype(input_dtype)
+
+
+def dequantize_output(output, output_detail):
+    output = np.array(output)
+
+    if output.dtype == np.float32:
+        return output.astype(np.float32)
+
+    quantization = output_detail.get("quantization", None)
+
+    if quantization:
+        scale, zero_point = quantization
+
+        if scale and scale > 0:
+            output = (output.astype(np.float32) - zero_point) * scale
+
+    return output.astype(np.float32)
+
+
 def predict_ecg_file(file_path):
-    (
-        interpreter,
-        signature_runner,
-        input_name,
-        output_name,
-        classes,
-        _,
-        _,
-        _,
-    ) = load_assets()
+    classes, train_mean, train_std, config = load_metadata()
 
-    x = prepare_signal(file_path)
+    interpreter, input_details, output_details = create_interpreter()
 
-    if signature_runner is not None:
-        result = signature_runner(**{input_name: x})
+    x = prepare_signal(
+        file_path=file_path,
+        input_details=input_details,
+        train_mean=train_mean,
+        train_std=train_std,
+        config=config,
+    )
 
-        if output_name in result:
-            prediction = result[output_name]
-        else:
-            prediction = list(result.values())[0]
-    else:
+    input_index = input_details[0]["index"]
+    output_index = output_details[0]["index"]
+
+    expected_shape = list(input_details[0]["shape"])
+    actual_shape = list(x.shape)
+
+    if expected_shape != actual_shape:
+        interpreter.resize_tensor_input(input_index, actual_shape, strict=False)
+        interpreter.allocate_tensors()
+
         input_details = interpreter.get_input_details()
         output_details = interpreter.get_output_details()
-
-        if not input_details:
-            raise ValueError("TFLite input details are empty.")
-
-        if not output_details:
-            raise ValueError("TFLite output details are empty.")
 
         input_index = input_details[0]["index"]
         output_index = output_details[0]["index"]
 
-        expected_shape = list(input_details[0]["shape"])
-        actual_shape = list(x.shape)
+    x = apply_input_dtype_and_quantization(x, input_details[0])
 
-        if expected_shape != actual_shape:
-            interpreter.resize_tensor_input(input_index, actual_shape)
-            interpreter.allocate_tensors()
+    interpreter.allocate_tensors()
+    interpreter.set_tensor(input_index, x)
+    interpreter.invoke()
 
-            input_details = interpreter.get_input_details()
-            output_details = interpreter.get_output_details()
-
-            input_index = input_details[0]["index"]
-            output_index = output_details[0]["index"]
-
-        interpreter.set_tensor(input_index, x)
-        interpreter.invoke()
-        prediction = interpreter.get_tensor(output_index)
-
-    prediction = np.array(prediction, dtype=np.float32)
+    prediction = interpreter.get_tensor(output_index)
+    prediction = dequantize_output(prediction, output_details[0])
 
     if prediction.ndim == 2:
-        probabilities = prediction[0]
+        probabilities = prediction[0].astype(np.float32)
     else:
-        probabilities = prediction.reshape(-1)
+        probabilities = prediction.reshape(-1).astype(np.float32)
 
     if probabilities.size == 0:
         raise ValueError("TFLite model returned empty output.")
@@ -250,7 +238,7 @@ def predict_ecg_file(file_path):
 
     if class_index >= len(classes):
         raise ValueError(
-            f"Class index {class_index} is out of range. Classes length: {len(classes)}"
+            f"Predicted class index {class_index} is outside classes list. Classes length: {len(classes)}."
         )
 
     predicted_class = str(classes[class_index])
