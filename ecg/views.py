@@ -162,10 +162,6 @@ def serialize_record(record):
 
 
 def run_ai_model_placeholder(record):
-    """
-    Runs the real trained ECG model only when Analyze is requested.
-    TensorFlow is imported lazily to avoid loading it during server startup.
-    """
     file_path = get_record_file_path(record)
 
     if not file_path:
